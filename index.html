@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VIC Localities Runs Planner (Prototype)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+    #app { height: 100%; display: grid; grid-template-columns: 380px 1fr; }
+    #sidebar { padding: 12px; border-right: 1px solid #ddd; overflow: auto; background: #fff; }
+    #map { height: 100%; width: 100%; }
+
+    .row { margin-bottom: 10px; }
+    label { display: block; font-size: 12px; margin-bottom: 4px; color: #333; }
+    input, select, button {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    button { cursor: pointer; }
+    .muted { color: #666; font-size: 12px; }
+    .card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 10px; margin-top: 12px; background: #fafafa; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #ddd; background: #fff; margin-right: 6px; }
+    .hr { height: 1px; background: #eee; margin: 12px 0; }
+    .list { margin: 8px 0 0 0; padding: 0; list-style: none; }
+    .list li { padding: 6px 8px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; margin-bottom: 6px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .pill { padding: 2px 8px; border-radius: 999px; border: 1px solid #ddd; background: #fff; font-size: 12px; }
+    .btnRow { display: flex; gap: 8px; }
+    .btnRow button { width: 50%; }
+    .tiny { font-size: 11px; }
+    #legend {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 1000;
+      max-width: 260px;
+    }
+    #legend h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+      gap: 8px;
+    }
+    .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid #333;
+    }
+    .legend-muted {
+      color: #666;
+      font-size: 12px;
+    }
+    #assignedPanel {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 1000;
+      max-width: 420px;
+      max-height: 320px;
+      overflow: auto;
+    }
+    #assignedPanel h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .assigned-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      padding: 6px 6px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .assigned-row:hover {
+      background: #f3f4f6;
+    }
+    .assigned-muted {
+      color: #666;
+      font-size: 12px;
+    }
+    .assigned-pill {
+      font-size: 12px;
+      border: 1px solid #ddd;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #fff;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="sidebar">
+      <h3 style="margin: 0 0 8px;">VIC Localities Runs Planner</h3>
+      <div class="muted">Prototype: click locality → assign run → colour + label updates. Runs are user-managed.</div>
+
+      <div class="card">
+        <div><strong>Run manager</strong></div>
+        <div class="muted tiny" style="margin-top:6px;">Add/edit/delete runs here. Deleting a run also removes it from any locality assignments.</div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <label for="newRunId">Run number</label>
+          <input id="newRunId" placeholder="2–4 digits (e.g. 77, 920)" />
+        </div>
+
+        <div class="row">
+          <label for="newRunDriver">Driver name</label>
+          <input id="newRunDriver" placeholder="e.g. Tarun" />
+        </div>
+
+        <div class="btnRow">
+          <button id="addRunBtn">Add / Update run</button>
+          <button id="deleteRunBtn">Delete run</button>
+        </div>
+
+        <div class="hr"></div>
+        <div><strong>Current runs</strong></div>
+        <ul class="list" id="runsList"></ul>
+      </div>
+
+      <div class="card">
+        <div><strong>Selected locality</strong></div>
+        <div id="selectedInfo" class="muted" style="margin-top: 6px;">None selected yet. Click a locality polygon.</div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <label for="runSelect">Run (number – driver)</label>
+          <select id="runSelect"></select>
+        </div>
+
+        <div class="row">
+          <label for="deliveriesInput">Deliveries</label>
+          <input id="deliveriesInput" type="number" min="0" placeholder="e.g. 8" />
+        </div>
+
+        <div class="row">
+          <label for="boxesInput">Boxes</label>
+          <input id="boxesInput" type="number" min="0" placeholder="e.g. 45" />
+        </div>
+
+        <div class="row">
+          <button id="saveBtn">Save to this locality</button>
+        </div>
+
+        <div class="row">
+          <button id="clearBtn">Clear this locality assignment</button>
+        </div>
+
+        <div class="muted tiny">Storage is local only for now (localStorage). Team share comes later via backend DB.</div>
+      </div>
+
+      <div class="card">
+        <div><strong>Totals</strong></div>
+        <div style="margin-top: 8px;">
+          <span class="badge" id="totalLocalities">Localities: 0</span>
+          <span class="badge" id="totalDeliveries">Deliveries: 0</span>
+          <span class="badge" id="totalBoxes">Boxes: 0</span>
+        </div>
+
+        <div class="hr"></div>
+        <button id="resetAllBtn">Reset ALL saved data</button>
+      </div>
+    </div>
+
+    <div id="map">
+      <div id="assignedPanel"></div>
+      <div id="legend"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // =============================
+    // 0) Data file + field names
+    // =============================
+    const GEOJSON_FILE = "localities_vic.geojson";
+    const FIELD_NAME = "vic_loca_2";   // e.g. "ALBERT PARK"
+    const FIELD_ID   = "lc_ply_pid";   // unique locality polygon id (string/number)
+
+    // =============================
+    // 1) Storage keys
+    // =============================
+    const STORAGE_ASSIGNMENTS = "vic_locality_assignments_v2";
+    const STORAGE_RUNS        = "vic_runs_v1";
+
+    // =============================
+    // 2) Helpers: load/save
+    // =============================
+    function loadJson(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+      catch { return fallback; }
+    }
+    function saveJson(key, obj) { localStorage.setItem(key, JSON.stringify(obj)); }
+
+    // =============================
+    // 3) Runs (user-managed)
+    // =============================
+    // run object: { id: "920", driver: "Tarun", color: "#..." }
+    let runs = loadJson(STORAGE_RUNS, []);
+
+    // stable "auto" colors if user creates new runs (cycled)
+    const AUTO_COLORS = ["#ffd6a5","#caffbf","#9bf6ff","#bdb2ff","#ffc6ff","#fdffb6","#a0c4ff","#ffadad","#d0f4de","#fef9c3","#e9d5ff","#bae6fd"];
+    function pickNextColor() {
+      const used = new Set(runs.map(r => r.color));
+      for (const c of AUTO_COLORS) if (!used.has(c)) return c;
+      // fallback: just reuse (fine for prototype)
+      return AUTO_COLORS[runs.length % AUTO_COLORS.length];
+    }
+    function findRun(runId) {
+      return runs.find(r => r.id === String(runId));
+    }
+
+    // =============================
+    // 4) Assignments (by locality id)
+    // =============================
+    // assignment: { name: "...", runId: "920", deliveries: 0, boxes: 0 }
+    let store = loadJson(STORAGE_ASSIGNMENTS, {});
+
+    // =============================
+    // 5) Map setup
+    // =============================
+    const map = L.map('map').setView([-37.8136, 144.9631], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // =============================
+    // 6) UI refs
+    // =============================
+    const selectedInfo = document.getElementById("selectedInfo");
+    const runSelect = document.getElementById("runSelect");
+    const deliveriesInput = document.getElementById("deliveriesInput");
+    const boxesInput = document.getElementById("boxesInput");
+    const saveBtn = document.getElementById("saveBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const resetAllBtn = document.getElementById("resetAllBtn");
+
+    const totalLocalities = document.getElementById("totalLocalities");
+    const totalDeliveries = document.getElementById("totalDeliveries");
+    const totalBoxes = document.getElementById("totalBoxes");
+
+    const newRunId = document.getElementById("newRunId");
+    const newRunDriver = document.getElementById("newRunDriver");
+    const addRunBtn = document.getElementById("addRunBtn");
+    const deleteRunBtn = document.getElementById("deleteRunBtn");
+    const runsList = document.getElementById("runsList");
+
+    // =============================
+    // 7) Locality id/name helpers
+    // =============================
+    function getLocalityId(feature) {
+      const v = feature?.properties?.[FIELD_ID];
+      return (v === null || v === undefined) ? null : String(v);
+    }
+    function getLocalityName(feature) {
+      const v = feature?.properties?.[FIELD_NAME];
+      return (v === null || v === undefined || String(v).trim() === "") ? "(unknown)" : String(v);
+    }
+
+    // =============================
+    // 8) Styling by run
+    // =============================
+    function styleForLocality(localityId) {
+      const rec = store[localityId];
+      const runId = rec?.runId || "";
+      const run = runId ? findRun(runId) : null;
+      const fill = run?.color || "#ffffff";
+      return {
+        color: "#444",
+        weight: 1,
+        fillColor: fill,
+        fillOpacity: runId ? 0.55 : 0.12
+      };
+    }
+
+    // =============================
+    // 9) Labels
+    // =============================
+    const labelMarkers = new Map(); // localityId -> marker
+    function updateLabelForLocality(localityId, layer) {
+      const old = labelMarkers.get(localityId);
+      if (old) { map.removeLayer(old); labelMarkers.delete(localityId); }
+
+      const rec = store[localityId];
+      if (!rec || !rec.runId) return;
+
+      const center = layer.getBounds().getCenter();
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="
+          background: white;
+          border: 1px solid #333;
+          border-radius: 10px;
+          padding: 2px 8px;
+          font-size: 12px;
+          font-weight: 700;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        ">${rec.runId}</div>`
+      });
+
+      const m = L.marker(center, { icon, interactive: false });
+      m.addTo(map);
+      labelMarkers.set(localityId, m);
+    }
+
+    function refreshAllLabels() {
+      for (const m of labelMarkers.values()) map.removeLayer(m);
+      labelMarkers.clear();
+      if (!geoLayer) return;
+      geoLayer.eachLayer(layer => {
+        const id = getLocalityId(layer.feature);
+        if (id) updateLabelForLocality(id, layer);
+      });
+    }
+
+    // =============================
+    // 10) Runs dropdown + list
+    // =============================
+    function renderRunsUI() {
+      // dropdown
+      runSelect.innerHTML = "";
+      const optNone = document.createElement("option");
+      optNone.value = "";
+      optNone.textContent = "(none)";
+      runSelect.appendChild(optNone);
+
+      runs
+        .slice()
+        .sort((a,b) => a.id.localeCompare(b.id))
+        .forEach(r => {
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          opt.textContent = `${r.id} – ${r.driver}`;
+          runSelect.appendChild(opt);
+        });
+
+      // list
+      runsList.innerHTML = "";
+      runs
+        .slice()
+        .sort((a,b) => a.id.localeCompare(b.id))
+        .forEach(r => {
+          const li = document.createElement("li");
+          li.innerHTML = `
+            <span><span class="pill" style="background:${r.color}">${r.id}</span> ${r.driver}</span>
+            <span class="mono tiny">edit: type ${r.id} above</span>
+          `;
+          runsList.appendChild(li);
+        });
+
+      saveJson(STORAGE_RUNS, runs);
+    }
+
+    renderRunsUI();
+
+    const legendEl = document.getElementById("legend");
+    const assignedPanelEl = document.getElementById("assignedPanel");
+
+    function renderLegend() {
+      if (!legendEl) return;
+
+      if (!runs.length) {
+        legendEl.style.display = "none";
+        return;
+      }
+
+      legendEl.style.display = "block";
+
+      legendEl.innerHTML = `
+        <h4>Runs</h4>
+        ${runs
+          .slice()
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map(r => `
+            <div class="legend-item">
+              <div class="legend-color" style="background:${r.color}"></div>
+              <div>${r.id} – ${r.driver}</div>
+            </div>
+          `)
+          .join("")}
+      `;
+    }
+
+    renderLegend();
+
+    function renderAssignedPanel() {
+      if (!assignedPanelEl) return;
+
+      // Build list of assigned localities (runId present)
+      const items = Object.entries(store)
+        .map(([localityId, rec]) => ({ localityId, ...rec }))
+        .filter(x => x.runId && x.runId !== "")
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+      if (!items.length) {
+        assignedPanelEl.style.display = "none";
+        return;
+      }
+
+      assignedPanelEl.style.display = "block";
+
+      assignedPanelEl.innerHTML = `
+        <h4>Assigned localities (${items.length})</h4>
+        <div class="assigned-muted">Click a row to zoom/select on the map</div>
+        <div style="height:8px"></div>
+        ${items.map(x => {
+          const run = findRun(x.runId);
+          const driver = run ? run.driver : "Unknown";
+          const d = Number(x.deliveries || 0);
+          const b = Number(x.boxes || 0);
+          return `
+            <div class="assigned-row" data-locality-id="${x.localityId}">
+              <div>
+                <div><strong>${x.name || "(unknown)"}</strong></div>
+                <div class="assigned-muted">Deliveries: ${d} • Boxes: ${b}</div>
+              </div>
+              <div class="assigned-pill">${x.runId}</div>
+              <div class="assigned-muted">${driver}</div>
+            </div>
+          `;
+        }).join("")}
+      `;
+
+      // click handler (event delegation)
+      assignedPanelEl.querySelectorAll(".assigned-row").forEach(row => {
+        row.addEventListener("click", () => {
+          const id = row.getAttribute("data-locality-id");
+          if (!id || !geoLayer) return;
+
+          // Find the polygon layer with this localityId
+          let foundLayer = null;
+          let foundName = null;
+
+          geoLayer.eachLayer(layer => {
+            const lid = getLocalityId(layer.feature);
+            if (lid === id) {
+              foundLayer = layer;
+              foundName = getLocalityName(layer.feature);
+            }
+          });
+
+          if (!foundLayer) return;
+
+          map.fitBounds(foundLayer.getBounds());
+          selectLocality(id, foundName, foundLayer);
+        });
+      });
+    }
+
+    renderAssignedPanel();
+
+    // =============================
+    // 11) Totals
+    // =============================
+    function refreshTotals() {
+      const keys = Object.keys(store);
+      let d = 0, b = 0, assignedCount = 0;
+
+      for (const k of keys) {
+        const rec = store[k] || {};
+        d += Number(rec.deliveries || 0);
+        b += Number(rec.boxes || 0);
+        if (rec.runId) assignedCount++;
+      }
+
+      totalLocalities.textContent = `Localities: ${assignedCount}`;
+      totalDeliveries.textContent = `Deliveries: ${d}`;
+      totalBoxes.textContent = `Boxes: ${b}`;
+    }
+
+    // =============================
+    // 12) GeoJSON load + selection
+    // =============================
+    let geoLayer = null;
+    let selectedLocalityId = null;
+    let selectedLocalityName = null;
+    let selectedLayer = null;
+
+    function selectLocality(id, name, layer) {
+      selectedLocalityId = id;
+      selectedLocalityName = name;
+      selectedLayer = layer;
+
+      const rec = store[id] || { name, runId:"", deliveries:"", boxes:"" };
+
+      selectedInfo.innerHTML = `
+        <div><span class="badge">Locality</span><strong>${name}</strong></div>
+        <div class="muted tiny" style="margin-top:6px;">ID: <span class="mono">${id}</span></div>
+      `;
+
+      runSelect.value = rec.runId || "";
+      deliveriesInput.value = (rec.deliveries ?? "");
+      boxesInput.value = (rec.boxes ?? "");
+
+      // highlight
+      geoLayer.eachLayer(l => {
+        const lid = getLocalityId(l.feature);
+        if (lid) l.setStyle(styleForLocality(lid));
+      });
+      layer.setStyle({ weight: 3 });
+    }
+
+    function applyStoreToLayer(localityId) {
+      if (!geoLayer) return;
+      geoLayer.eachLayer(layer => {
+        const id = getLocalityId(layer.feature);
+        if (id === localityId) {
+          layer.setStyle(styleForLocality(id));
+          updateLabelForLocality(id, layer);
+        }
+      });
+    }
+
+    fetch(GEOJSON_FILE)
+      .then(r => {
+        if (!r.ok) throw new Error(`Could not load ${GEOJSON_FILE}. Make sure it's next to index.html and you use Live Server.`);
+        return r.json();
+      })
+      .then(data => {
+        geoLayer = L.geoJSON(data, {
+          style: (feature) => {
+            const id = getLocalityId(feature);
+            return styleForLocality(id);
+          },
+          onEachFeature: (feature, layer) => {
+            const id = getLocalityId(feature);
+            const name = getLocalityName(feature);
+
+            layer.on("click", () => {
+              if (!id) return;
+              selectLocality(id, name, layer);
+            });
+
+            // hover tooltip (UX upgrade)
+            layer.bindTooltip(name, { sticky: true, direction: "auto", opacity: 0.9 });
+
+            layer.on("mouseover", () => layer.setStyle({ fillOpacity: 0.7 }));
+            layer.on("mouseout", () => {
+              if (!id) return;
+              layer.setStyle(styleForLocality(id));
+            });
+          }
+        }).addTo(map);
+
+        try { map.fitBounds(geoLayer.getBounds(), { padding: [20, 20] }); } catch {}
+
+        refreshAllLabels();
+        refreshTotals();
+        renderAssignedPanel();
+      })
+      .catch(err => {
+        console.error(err);
+        alert("GeoJSON failed to load. Check file name, location, and Live Server.");
+      });
+
+    // =============================
+    // 13) Save / clear / reset
+    // =============================
+    saveBtn.addEventListener("click", () => {
+      if (!selectedLocalityId) { alert("Click a locality on the map first."); return; }
+
+      store[selectedLocalityId] = {
+        name: selectedLocalityName || "(unknown)",
+        runId: runSelect.value || "",
+        deliveries: Number(deliveriesInput.value || 0),
+        boxes: Number(boxesInput.value || 0)
+      };
+
+      saveJson(STORAGE_ASSIGNMENTS, store);
+      applyStoreToLayer(selectedLocalityId);
+      refreshTotals();
+      renderAssignedPanel();
+    });
+
+    clearBtn.addEventListener("click", () => {
+      if (!selectedLocalityId) { alert("Click a locality on the map first."); return; }
+
+      delete store[selectedLocalityId];
+      saveJson(STORAGE_ASSIGNMENTS, store);
+      applyStoreToLayer(selectedLocalityId);
+
+      runSelect.value = "";
+      deliveriesInput.value = "";
+      boxesInput.value = "";
+
+      refreshTotals();
+      renderAssignedPanel();
+    });
+
+    resetAllBtn.addEventListener("click", () => {
+      const ok = confirm("Reset ALL saved data? This cannot be undone.");
+      if (!ok) return;
+
+      store = {};
+      saveJson(STORAGE_ASSIGNMENTS, store);
+
+      if (geoLayer) {
+        geoLayer.eachLayer(layer => {
+          const id = getLocalityId(layer.feature);
+          if (id) layer.setStyle(styleForLocality(id));
+        });
+      }
+      refreshAllLabels();
+      refreshTotals();
+      renderAssignedPanel();
+
+      selectedLocalityId = null;
+      selectedLocalityName = null;
+      selectedLayer = null;
+      selectedInfo.textContent = "None selected yet. Click a locality polygon.";
+      runSelect.value = "";
+      deliveriesInput.value = "";
+      boxesInput.value = "";
+    });
+
+    // =============================
+    // 14) Run manager actions
+    // =============================
+    addRunBtn.addEventListener("click", () => {
+      const id = (newRunId.value || "").trim();
+      const driver = (newRunDriver.value || "").trim();
+
+      // validation
+      if (!/^\d{2,4}$/.test(id)) {
+        alert("Run number must be 2–4 digits only (e.g. 77, 397, 920).");
+        return;
+      }
+      if (!driver) {
+        alert("Driver name is required.");
+        return;
+      }
+
+      const existing = findRun(id);
+      if (existing) {
+        existing.driver = driver; // update only
+      } else {
+        runs.push({ id, driver, color: pickNextColor() });
+      }
+
+      saveJson(STORAGE_RUNS, runs);
+      renderRunsUI();
+      renderLegend();
+      renderAssignedPanel();
+
+      newRunId.value = "";
+      newRunDriver.value = "";
+
+      alert("Run saved.");
+    });
+
+    deleteRunBtn.addEventListener("click", () => {
+      const id = (newRunId.value || "").trim();
+      if (!id) { alert("Enter the run number to delete."); return; }
+
+      const existing = findRun(id);
+      if (!existing) { alert("Run not found: " + id); return; }
+
+      const ok = confirm(`Delete run ${id} – ${existing.driver}?\nThis will also remove this run from any locality assignments.`);
+      if (!ok) return;
+
+      // remove run
+      runs = runs.filter(r => r.id !== id);
+
+      // remove run from assignments (option B)
+      for (const k of Object.keys(store)) {
+        if (store[k]?.runId === id) {
+          store[k].runId = "";
+        }
+      }
+      saveJson(STORAGE_ASSIGNMENTS, store);
+
+      // redraw layer styles + labels
+      if (geoLayer) {
+        geoLayer.eachLayer(layer => {
+          const lid = getLocalityId(layer.feature);
+          if (lid) layer.setStyle(styleForLocality(lid));
+        });
+      }
+      refreshAllLabels();
+      refreshTotals();
+
+      renderRunsUI();
+      renderLegend();
+      renderAssignedPanel();
+      alert("Run deleted and removed from assignments.");
+    });
+  </script>
+</body>
+</html>
